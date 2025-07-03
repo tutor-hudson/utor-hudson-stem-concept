@@ -52,7 +52,8 @@ function uploadFile() {
         url: url,
         name: file.name,
         user: user.email,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        likes: []
       }).then(() => {
         alert("File uploaded and saved!");
         loadPosts();
@@ -63,23 +64,83 @@ function uploadFile() {
   });
 }
 
+function toggleLike(postId, currentLikes) {
+  const user = firebase.auth().currentUser;
+  if (!user) return;
+
+  const liked = currentLikes.includes(user.email);
+  const updatedLikes = liked 
+    ? currentLikes.filter(email => email !== user.email) 
+    : [...currentLikes, user.email];
+
+  firebase.firestore().collection("posts").doc(postId).update({
+    likes: updatedLikes
+  }).then(() => {
+    loadPosts();
+  });
+}
+
+function addComment(postId) {
+  const user = firebase.auth().currentUser;
+  if (!user) {
+    alert("Login to comment.");
+    return;
+  }
+  const comment = prompt("Your comment:");
+  if (!comment) return;
+
+  firebase.firestore().collection("posts").doc(postId).collection("comments").add({
+    user: user.email,
+    comment: comment,
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(() => {
+    loadPosts();
+  });
+}
+
+function loadComments(postId, container) {
+  firebase.firestore().collection("posts").doc(postId).collection("comments")
+    .orderBy("timestamp", "asc").get().then(snapshot => {
+      container.innerHTML = "";
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const comment = document.createElement("p");
+        comment.innerHTML = `<strong>${data.user}:</strong> ${data.comment}`;
+        container.appendChild(comment);
+      });
+    });
+}
+
 function loadPosts() {
   const postList = document.getElementById("postList");
   postList.innerHTML = "<p>Loading posts...</p>";
   firebase.firestore().collection("posts").orderBy("timestamp", "desc").get()
-    .then((snapshot) => {
+    .then(snapshot => {
       postList.innerHTML = "";
-      snapshot.forEach((doc) => {
+      snapshot.forEach(doc => {
         const data = doc.data();
+        const postId = doc.id;
         const postElement = document.createElement("div");
+
+        const media = data.url.endsWith(".mp4") ?
+          `<video controls width="300"><source src="${data.url}" type="video/mp4"></video>` :
+          `<img src="${data.url}" width="300" />`;
+
+        const likeCount = data.likes.length;
+        const user = firebase.auth().currentUser;
+        const liked = user && data.likes.includes(user.email);
+        const likeText = liked ? "❤️ Unlike" : "🤍 Like";
+
         postElement.innerHTML = `
           <p><strong>${data.user}</strong> posted:</p>
-          ${data.url.endsWith(".mp4") ? 
-            `<video controls width="300"><source src="${data.url}" type="video/mp4"></video>` :
-            `<img src="${data.url}" width="300" />`}
+          ${media}
+          <p><button onclick="toggleLike('${postId}', ${JSON.stringify(data.likes)})">${likeText}</button> ${likeCount} likes</p>
+          <button onclick="addComment('${postId}')">💬 Comment</button>
+          <div id="comments-${postId}">Loading comments...</div>
           <hr />
         `;
         postList.appendChild(postElement);
+        loadComments(postId, document.getElementById(`comments-${postId}`));
       });
     });
 }
